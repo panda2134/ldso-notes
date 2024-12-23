@@ -11,7 +11,8 @@
         : "rax", "rdi", "rsi", "rdx"\
     )
 
-void _start_c(void* sp) {
+
+int _start_c(void* sp) {
     uint64_t argc = *(uint64_t*)sp;
     uint8_t** argv = (void*)((uint8_t*)sp + 8);
     for (int i = 0; i < argc; i++) {
@@ -21,4 +22,5 @@ void _start_c(void* sp) {
         PUTS(v, j);
         PUTS("\n", 1);
     }
+    return 0;
 }

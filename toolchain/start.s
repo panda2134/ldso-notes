@@ -3,6 +3,7 @@
 _start:
 	mov %rsp, %rdi
 	call _start_c
-	movq $SYS_exit, %rax
 	xorq %rdi, %rdi
+	movl %eax, %edi
+	movq $SYS_exit, %rax
 	syscall
