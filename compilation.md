@@ -28,4 +28,4 @@ The correct way would be (similar to what's done with musl ld.so):
 
 By making ld.so dynamic, it can be loaded to other addresses by the kernel, implementing ASLR. A static version of ld.so cannot be moved around, which may interfere with other .so libraries to be loaded later.
 
-However, I cannot find a way to avoid using PLTs when calling from `start.s` to `main.c`, so we temporarily fall back to a static PIE version of ld.so (see `toolchain/` folder).
+However, I cannot find a way to avoid PLTs in the generated code when calling from `start.s` to `main.c`, so we temporarily fall back to a static PIE version of ld.so (see `toolchain/` folder).
