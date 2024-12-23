@@ -1,7 +1,7 @@
 #include <sys/syscall.h>
 #include <stdint.h>
 #define PUTS(buf,len) asm volatile (\
-        "movq $1, %%rax;"\
+        "movq $1, %%rax;" /* write */\
         "movq $1, %%rdi;" /* stdout */\
         "movq %0, %%rsi;"\
         "movq %1, %%rdx;"\
