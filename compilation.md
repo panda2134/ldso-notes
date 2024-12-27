@@ -49,4 +49,13 @@ Many claim that ASLR depends on PIE to move executables around, but ASLR was pro
 
 ### Our choices
 
-Our `ld.so` need not support ASLR. To avoid linking issues, we make it a statically-linked PIE executable. Because it depends on nothing external, the only self-relocation required is about its global variables. If the kernel always put the ld.so at its desired base address, no relocation would be needed at all, but whether this is always true remains to be investigated.
+Our `ld.so` need not support ASLR. To avoid linking issues, we make it a statically-linked PIE executable. Because it depends on nothing external, the only self-relocation required is about its global variables. If the kernel always put the ld.so at its desired base address, relocation will only be required if it lies in the way of target executable to be loaded.
+
+- [ ] TODO: Verify this by inspecting musl ld.so.
+
+```c
+int a = 0;  // global variable, accessed by pc-relative addressing like "lea 0x2e68(%rip),%rbx"
+int b = &a; // global pointer to global variable, should be updated according to .rel / .rela
+```
+
+The current behavior observed is that under static-pie, all calls and global variable addressing in functions use pc-relative addressing. Global pointers containing references of global variables will be tackled with `.rel` / `.rela` / `.relr` sections by the runtime. As the dynamic pointer ourself, and notably, without the support of glibc runtime, we have to perform the relocations in these sections in our code, which is a type of self-relocation. Before the relocation, global pointers to global variables does not contain correct values, and we should refrain from using them.

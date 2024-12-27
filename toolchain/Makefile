@@ -1,12 +1,8 @@
-all: main.c start.s
-	ccomp -finline-asm -nostdlib -c main.c
-	cpp start.s | as -o start.o -
-	ld -pie --no-dynamic-linker -o ld.my.so start.o main.o
+CC = ccomp -finline-asm
 
-debug: main.c start.s
-	gcc -g -nostdlib -c main.c
-	cpp start.s | as -o start.o -
-	ld -pie --no-dynamic-linker -o ld.my.so start.o main.o
+all: main.c
+	${CC} -nostdlib -c main.c
+	ld -shared -pie --no-dynamic-linker --entry _start -o ld.my.so main.o
 
 .PHONY: clean
 

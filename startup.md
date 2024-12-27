@@ -14,11 +14,12 @@ The dynamic linker takes 3 stages to load and relocate itself.
     - The ld.so can be invoked in two ways: either by `/path/to/ld.so executable` or by directly executing `executable`
       - In the first way, kernel does not put base address of executable into the aux vars (because the executable is ld.so itself), so the base address has to be set up manually using program headers.
   - It also gathers relocation related data from the `_DYNAMIC` symbol (which is the dynamic section for musl libc.so file)
+    - The musl ld.so is merged with libc.so
     - `DT_REL` / `DT_RELSZ` in the `_DYNAMIC` section defines where to find the relocation table & how large it is
       - ld.so access the relocation table, and adds base offset to each entry
     - `DT_RELA` / `DT_RELASZ` is similar, but ld.so adds (base offset + offset in entry)
-    - `DT_RELR` / `DT_RELRSZ` is similar, but for relative relocation.
-    - For all these, only the tags `REL_RELATIVE` and `REL_SYM_OR_REL` are processed
+    - `DT_RELR` / `DT_RELRSZ` is similar, but for relative relocation. Such a new format seems to be [saving loads of space](https://maskray.me/blog/2021-10-31-relative-relocations-and-relr). It is reported that RELR can typically encode the same information in .rela.dyn in less than 3% space. As this format is relatively new and complicated, it would be okay to temporarily put it aside.
+    - For all these, only the tags `REL_RELATIVE` and `REL_SYM_OR_REL` are processed. The latter is MIPS-only, so we only need to process `REL_RELATIVE` (which is `R_X86_64_RELATIVE` under x86-64). After fixing this, internal functions in the dynamic linker can be called.
   - After editing the relocation tables at `_DYNAMIC`, it then goes to stage 2.
 - **Stage 2** of dynamic linker is invoked by stage 1.
   - **Jobs done: filling struct dso for libc, addend saving, parse other tags in dynamic section of libc, multi-threading**
@@ -27,10 +28,9 @@ The dynamic linker takes 3 stages to load and relocate itself.
     - `struct dso` is the node type of a doubly-linked list, containing SO file details and two pointers to the prev/next elements.
     - data in dso comes from the program header (`PT_xxx`), ELF header, aux variables on stack, and `_DYNAMIC` section
     - `struct dso` includes things like library name, rpath, got, symbol hashtables, base address, etc.
-  - [ ] It then does REL addend saving for ld.so (TODO: what is this?)
+  - [x] It then does REL addend saving for ld.so (see System V ABI page 69-71)
   - It relocates ld.so again. This time, it doesn't simply add the offset, but proceeds with a complex algorithm, accounting for every symbol type.
-    - Most of this algorithm is about addition/subtraction on addresses and offsets
-    - [ ] TODO: figure out detailed specs in natural language
+    - Most of this algorithm is about addition/subtraction on addresses and offsets. (see System V ABI page 69-71)
   - After these steps, it calls **stage 2b)** to do multithreading-related work
     - Set up thread local storage (TLS)
     - [ ] TODO: figure out musl's pthread implementation & how ld.so handles TLS when loading a library
