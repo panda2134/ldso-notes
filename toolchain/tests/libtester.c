@@ -1,3 +1,4 @@
-void foo() {
-    asm volatile ("cpuid");
+int a = 1;
+int foo() {
+    return a;
 }

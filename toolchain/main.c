@@ -107,9 +107,26 @@ hidden noplt int _start_c(void* sp) {
     // If we need to load the target executable on our own, we'll have to move ld.so around if necessary.
     // Otherwise the kernel ELF loader would have done that for us.
     if (direct_invoke) {
-        __dl_puts("Direct invokation not supported yet");
+        __dl_puts("Direct invokation not supported yet, because we haven't implemented code moving ld.so around");
         return 1;
     }
     // Then, we go through relocation tables.
+    Elf64_Dyn *dyn = 0;
+    for (int64_t i = 0; i < phnum; i++) {
+        Elf64_Phdr *e = (Elf64_Phdr*)phdr_val + i;
+        if (e->p_type != PT_DYNAMIC) {
+            continue;
+        }
+        __dl_puts("Dynamic segment found. Reading dynamic section items...");
+        dyn = (void*) e->p_vaddr;
+    }
+    // Parse the dynamic section to get the relocation tables.
+    // Ref: https://refspecs.linuxbase.org/elf/gabi4+/ch5.dynamic.html#dynamic_section
+    for (Elf64_Dyn *p = dyn; p->d_tag; p++) {
+        __dl_stdout_fputs("==> DT = ");
+        __dl_print_hex(p->d_tag);
+        __dl_stdout_fputs("    V  = ");
+        __dl_print_hex(p->d_un.d_val);
+    }
     return 0;
 }
