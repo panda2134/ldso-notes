@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "utils.h"
 #include "auxv.h"
 #include "elf.h"
@@ -80,7 +81,10 @@ hidden noplt int _start_c(void* sp) {
         return 127;
     }
 
+    bool direct_invoke = false;
+
     if (!ldso_base) {
+        direct_invoke = true;
         // ld.so is invoked directly, and we need to find its base address.
         // We might need to move it later in case the target executable is non-PIE (and we'll have to give way).
         __dl_puts("==> ld.my.so is invoked directly from command line");
@@ -100,7 +104,12 @@ hidden noplt int _start_c(void* sp) {
     // otherwise, ld.so is load by kernel and its base address is already available.
     __dl_stdout_fputs(" ld.so base = "); __dl_print_hex((uint64_t)ldso_base);
 
-    
-
+    // If we need to load the target executable on our own, we'll have to move ld.so around if necessary.
+    // Otherwise the kernel ELF loader would have done that for us.
+    if (direct_invoke) {
+        __dl_puts("Direct invokation not supported yet");
+        return 1;
+    }
+    // Then, we go through relocation tables.
     return 0;
 }
