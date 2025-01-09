@@ -35,15 +35,17 @@ hidden noplt int _start_c(void* sp) {
 
     // __dl_puts("Environs:");
     char** envp = argv + (argc + 1);
-    // for (; *envp; envp++) {
-    //     __dl_puts(*envp);
-    // }
+    for (; *envp; envp++) {
+        // Jump through all environs
+        // do nothing
+    }
 
     __dl_puts("Aux:");
     auxv_t* auxv = (void*)(envp + 1);
     int64_t execfd_val = 0, phent = 0, phnum = 0;
     void *phdr_val = 0, *ldso_base = 0;
     for (; auxv->a_type != AT_NULL; auxv++) {
+        __dl_print_hex(auxv->a_type);
         switch (auxv->a_type) {
             case AT_EXECFD:
                 execfd_val = auxv->a_un.a_val;
