@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "auxv.h"
 #include "elf.h"
+#include "main.h"
 
 // The _start function should be the first function in main.c. It is the entry point of dynamic linker.
 // Do not move it around, as its address is used for detecting self-relocation.
@@ -174,8 +175,8 @@ hidden noplt int _start_c(void* sp) {
     // TODO: parse the GNU_HASH hashtable for symbols
 
     // multiple DT_NEEDED entries may exist
-    void *rel_table = 0, *rela_table = 0;
-    uint64_t rel_sz = 0, rela_sz = 0;
+    void *rel_table = 0, *rela_table = 0, *plt_reloc_table = 0;
+    uint64_t rel_cnt = 0, rela_cnt = 0, plt_reloc_type = 0, plt_reloc_size = 0;
     for (Elf64_Dyn *p = dyn; p->d_tag; p++) {
         switch (p->d_tag) {
             case DT_NEEDED:
@@ -190,42 +191,77 @@ hidden noplt int _start_c(void* sp) {
                 rel_table = (void*) p->d_un.d_ptr;
                 break;
             case DT_RELSZ:
-                rel_sz = p->d_un.d_val;
+                rel_cnt = p->d_un.d_val / sizeof(Elf64_Rel);
                 break;
             case DT_RELA:
                 rela_table = (void*) p->d_un.d_ptr;
                 break;
             case DT_RELASZ:
-                rela_sz = p->d_un.d_val;
+                rela_cnt = p->d_un.d_val / sizeof(Elf64_Rela);
+                break;
+            case DT_PLTREL:
+                plt_reloc_type = p->d_un.d_val;
+                break;
+            case DT_PLTRELSZ:
+                plt_reloc_size = p->d_un.d_val;
+                break;
+            case DT_JMPREL:
+                plt_reloc_table = (void*) p->d_un.d_ptr;
                 break;
         }
     }
     // read and parse RELA / REL.
+    __dl_puts("Parsing REL/RELA relocations for GOT...");
+    __dl_print_rela_table(rela_cnt, rela_table, sym_table, str_table);
+    __dl_print_rel_table(rel_cnt, rel_table, sym_table, str_table);
 
-    __dl_puts("RELA relocation entries:");
-    __dl_print_int(rela_sz);
-    if (rela_table != 0) {
-        uint64_t r = rela_sz;
-        for (Elf64_Rela* entry = rela_table; rela_sz; entry++, rela_sz -= sizeof(Elf64_Rela)) {
-            __dl_stdout_fputs("==> Offset: "); __dl_print_hex(entry->r_offset);
-            __dl_stdout_fputs("==> Addend: "); __dl_print_hex(entry->r_addend);
-            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
-            __dl_stdout_fputs("==> Sym#: "); __dl_print_hex(reloc_sym);
-            __dl_stdout_fputs("==> Type: "); __dl_print_hex(reloc_type);
-            
-        }
-    }
-    __dl_puts("REL relocation entries:");
-    __dl_print_int(rel_sz);
-    if (rel_table != 0) {
-        uint64_t r = rel_sz;
-        for (Elf64_Rel* entry = rela_table; rel_sz; entry++, rela_sz -= sizeof(Elf64_Rela)) {
-            __dl_stdout_fputs("==> Offset: "); __dl_print_hex(entry->r_offset);
-            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
-            __dl_stdout_fputs("==> Sym#: "); __dl_print_hex(reloc_sym);
-            __dl_stdout_fputs("==> Type: "); __dl_print_hex(reloc_type);
-            
-        }
-    }
+    if (plt_reloc_type != DT_REL && plt_reloc_type != DT_RELA) __dl_die("unsupported PLT relocation type");
+    __dl_stdout_fputs("PLT Relocations will be eagerly bound; Type = ");
+    __dl_puts(plt_reloc_type == DT_RELA ? "RELA" : "REL");
+    uint64_t plt_reloc_cnt = plt_reloc_size / (plt_reloc_type == DT_RELA ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
+    if (plt_reloc_type == DT_REL) __dl_print_rel_table(plt_reloc_cnt, plt_reloc_table, sym_table, str_table);
+    else __dl_print_rela_table(plt_reloc_cnt, plt_reloc_table, sym_table, str_table);
     return 0;
+}
+
+void __dl_print_rel_table(uint64_t rel_cnt, void *rel_table, Elf64_Sym *sym_table, char *str_table)
+{
+    __dl_stdout_fputs("REL relocation entries: count = ");
+    __dl_print_int(rel_cnt);
+    if (rel_table != 0)
+    {
+        uint64_t r = rel_cnt;
+        for (Elf64_Rel *entry = rel_table; r; entry++, r--)
+        {
+            __dl_stdout_fputs("==> Offset: ");
+            __dl_print_hex(entry->r_offset);
+            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
+            __dl_stdout_fputs("==> Sym: ");
+            __dl_puts(str_table + (sym_table + reloc_sym)->st_name);
+            __dl_stdout_fputs("==> Type: ");
+            __dl_print_hex(reloc_type);
+        }
+    }
+}
+
+void __dl_print_rela_table(uint64_t rela_cnt, void *rela_table, Elf64_Sym *sym_table, char *str_table)
+{
+    __dl_stdout_fputs("RELA relocation entries: count = ");
+    __dl_print_int(rela_cnt);
+    if (rela_table != 0)
+    {
+        uint64_t r = rela_cnt;
+        for (Elf64_Rela *entry = rela_table; r; entry++, r--)
+        {
+            __dl_stdout_fputs("==> Offset: ");
+            __dl_print_hex(entry->r_offset);
+            __dl_stdout_fputs("==> Addend: ");
+            __dl_print_hex(entry->r_addend);
+            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
+            __dl_stdout_fputs("==> Sym: ");
+            __dl_puts(str_table + (sym_table + reloc_sym)->st_name);
+            __dl_stdout_fputs("==> Type: ");
+            __dl_print_hex(reloc_type);
+        }
+    }
 }
