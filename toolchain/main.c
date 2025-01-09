@@ -106,8 +106,8 @@ hidden noplt int _start_c(void* sp) {
     // If we need to load the target executable on our own, we'll have to move ld.so around if necessary.
     // Otherwise the kernel ELF loader would have done that for us.
     if (direct_invoke) {
-        __dl_puts("Direct invokation not supported yet, because we haven't implemented code moving ld.so around");
-        return 1;
+        
+        __dl_die("Direct invokation not supported yet, because we haven't implemented code moving ld.so around");
     }
     // Then, we go through relocation tables. The following code may be reused for loading shared objects.
     // We first find out the base address of the executable.
@@ -264,4 +264,6 @@ void __dl_print_rela_table(uint64_t rela_cnt, void *rela_table, Elf64_Sym *sym_t
             __dl_print_hex(reloc_type);
         }
     }
+
+    // some tests
 }

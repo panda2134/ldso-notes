@@ -95,3 +95,38 @@ hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab) {
   }
   return idx;
 }
+
+hidden noplt void * __dl_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    void *ret = 0;
+    asm volatile (
+        "movq %1, %%rdi;"
+        "movq %2, %%rsi;"
+        "movq %3, %%rdx;"
+        "movq %4, %%r10;"
+        "movq %5, %%r8;"
+        "movq %6, %%r9;"
+        "movq $9, %%rax;" // SYS_mmap
+        "syscall;"
+        "movq %%rax, %0"
+        : "=r" (ret)
+        : "r" (addr), "r" (len), "r" ((int64_t)prot), "r" ((int64_t)flags), "r" ((int64_t)fd), "r" (off)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
+
+hidden noplt int __dl_open(const char *pathname, int flags, int mode) {
+    int ret = 0;
+    asm volatile (
+        "movq %1, %%rdi;"
+        "movq %2, %%rsi;"
+        "movq %3, %%rdx;"
+        "movq $2, %%rax;" // SYS_open
+        "syscall;"
+        "movl %%eax, %0"
+        : "=r" (ret)
+        : "r" (pathname), "r" ((int64_t)flags), "r" ((int64_t)mode)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
