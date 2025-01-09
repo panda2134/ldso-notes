@@ -77,8 +77,7 @@ hidden noplt int _start_c(void* sp) {
     __dl_puts("END");
 
     if (phent != sizeof(Elf64_Phdr)) {
-        __dl_puts("ERROR: Program header entry size != 56");
-        return 127;
+        __dl_die("Program header entry size != 56");
     }
 
     bool direct_invoke = false;
@@ -97,8 +96,7 @@ hidden noplt int _start_c(void* sp) {
             }
         }
         if (!ldso_base) {
-            __dl_puts("ERROR: cannot decide base address of ld.so");
-            return 127;
+            __dl_die("cannot decide base address of ld.so");
         }
     }
     // otherwise, ld.so is load by kernel and its base address is already available.
@@ -110,23 +108,124 @@ hidden noplt int _start_c(void* sp) {
         __dl_puts("Direct invokation not supported yet, because we haven't implemented code moving ld.so around");
         return 1;
     }
-    // Then, we go through relocation tables.
+    // Then, we go through relocation tables. The following code may be reused for loading shared objects.
+    // We first find out the base address of the executable.
+    uint64_t exec_base = 0;
     Elf64_Dyn *dyn = 0;
+
+    // Find out base address using entry 0 in program header (segment) table.
+    for (int64_t i = 0; i < phnum; i++) {
+        Elf64_Phdr *e = (Elf64_Phdr*)phdr_val + i;
+        if (e->p_type == PT_PHDR) {
+            exec_base = (uint64_t)phdr_val - (uint64_t)e->p_vaddr;
+            break;
+        }
+    }
+    __dl_stdout_fputs(" exec base = "); __dl_print_hex(exec_base);
+    // Then, find the dynamic section by locating DYNAMIC segment.
     for (int64_t i = 0; i < phnum; i++) {
         Elf64_Phdr *e = (Elf64_Phdr*)phdr_val + i;
         if (e->p_type != PT_DYNAMIC) {
             continue;
         }
         __dl_puts("Dynamic segment found. Reading dynamic section items...");
-        dyn = (void*) e->p_vaddr;
+        dyn = (void*)(exec_base + e->p_vaddr);
     }
-    // Parse the dynamic section to get the relocation tables.
+    // Parse the dynamic section to get the relocation tables and symbol tables.
+    // To perform the relocation, we need to learn about symbol names. Thus symbol tables are needed.
     // Ref: https://refspecs.linuxbase.org/elf/gabi4+/ch5.dynamic.html#dynamic_section
+    char *str_table = 0;
+    Elf64_Sym *sym_table = 0;
+    void* hashtab = 0;
     for (Elf64_Dyn *p = dyn; p->d_tag; p++) {
-        __dl_stdout_fputs("==> DT = ");
-        __dl_print_hex(p->d_tag);
-        __dl_stdout_fputs("    V  = ");
-        __dl_print_hex(p->d_un.d_val);
+        switch (p->d_tag) {
+            case DT_STRTAB:
+                str_table = (void*)(exec_base + p->d_un.d_ptr);
+                break;
+            case DT_SYMTAB:
+                sym_table = (void*)(exec_base + p->d_un.d_ptr);
+                break;
+            case DT_GNU_HASH:
+                hashtab = (void*)(exec_base + p->d_un.d_ptr);
+                break;
+            case DT_FLAGS:
+                if (p->d_un.d_val & DF_TEXTREL) {
+                    __dl_puts("ERROR: No text relocation is supported");
+                    return 1;
+                }
+                break;
+        }
+    }
+    uint32_t symbol_num = __dl_gnu_hash_get_num_syms(hashtab);
+    // show symbols defined
+    Elf64_Sym *sym = sym_table;
+    for (uint32_t i = symbol_num; i; i--, sym++) {
+        __dl_stdout_fputs("==> Symbol name: ");
+        if (sym->st_name) {
+            __dl_puts(str_table + sym->st_name);
+        } else {
+            __dl_puts("[NO NAME]");
+        }
+        __dl_stdout_fputs("    Symbol value: ");
+        __dl_print_hex(sym->st_value);
+        __dl_stdout_fputs("    Symbol size: ");
+        __dl_print_int(sym->st_size);
+    }
+    // TODO: parse the GNU_HASH hashtable for symbols
+
+    // multiple DT_NEEDED entries may exist
+    void *rel_table = 0, *rela_table = 0;
+    uint64_t rel_sz = 0, rela_sz = 0;
+    for (Elf64_Dyn *p = dyn; p->d_tag; p++) {
+        switch (p->d_tag) {
+            case DT_NEEDED:
+                __dl_stdout_fputs("==> DT_NEEDED: ");
+                __dl_puts(str_table + p->d_un.d_val);
+                break;
+            case DT_RUNPATH:
+                __dl_stdout_fputs("==> DT_RUNPATH: ");
+                __dl_puts(str_table + p->d_un.d_val);
+                break;
+            case DT_REL:
+                rel_table = (void*) p->d_un.d_ptr;
+                break;
+            case DT_RELSZ:
+                rel_sz = p->d_un.d_val;
+                break;
+            case DT_RELA:
+                rela_table = (void*) p->d_un.d_ptr;
+                break;
+            case DT_RELASZ:
+                rela_sz = p->d_un.d_val;
+                break;
+        }
+    }
+    // read and parse RELA / REL.
+
+    __dl_puts("RELA relocation entries:");
+    __dl_print_int(rela_sz);
+    if (rela_table != 0) {
+        uint64_t r = rela_sz;
+        for (Elf64_Rela* entry = rela_table; rela_sz; entry++, rela_sz -= sizeof(Elf64_Rela)) {
+            __dl_stdout_fputs("==> Offset: "); __dl_print_hex(entry->r_offset);
+            __dl_stdout_fputs("==> Addend: "); __dl_print_hex(entry->r_addend);
+            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
+            __dl_stdout_fputs("==> Sym#: "); __dl_print_hex(reloc_sym);
+            __dl_stdout_fputs("==> Type: "); __dl_print_hex(reloc_type);
+            
+        }
+    }
+    __dl_puts("REL relocation entries:");
+    __dl_print_int(rel_sz);
+    if (rel_table != 0) {
+        uint64_t r = rel_sz;
+        for (Elf64_Rel* entry = rela_table; rel_sz; entry++, rela_sz -= sizeof(Elf64_Rela)) {
+            __dl_stdout_fputs("==> Offset: "); __dl_print_hex(entry->r_offset);
+            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
+            __dl_stdout_fputs("==> Sym#: "); __dl_print_hex(reloc_sym);
+            __dl_stdout_fputs("==> Type: "); __dl_print_hex(reloc_type);
+            
+        }
     }
     return 0;
 }
