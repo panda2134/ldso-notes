@@ -18,3 +18,4 @@ hidden noreturn noplt void __dl_die(char *msg);
 hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab);
 
 hidden noplt void * __dl_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+hidden noplt int __dl_open(const char *pathname, int flags, int mode);

@@ -3,6 +3,8 @@
 #include "utils.h"
 #include "auxv.h"
 #include "elf.h"
+#include "mman.h"
+#include "fcntl.h"
 #include "main.h"
 
 // The _start function should be the first function in main.c. It is the entry point of dynamic linker.
@@ -45,7 +47,6 @@ hidden noplt int _start_c(void* sp) {
     int64_t execfd_val = 0, phent = 0, phnum = 0;
     void *phdr_val = 0, *ldso_base = 0;
     for (; auxv->a_type != AT_NULL; auxv++) {
-        __dl_print_hex(auxv->a_type);
         switch (auxv->a_type) {
             case AT_EXECFD:
                 execfd_val = auxv->a_un.a_val;
@@ -223,6 +224,13 @@ hidden noplt int _start_c(void* sp) {
     uint64_t plt_reloc_cnt = plt_reloc_size / (plt_reloc_type == DT_RELA ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
     if (plt_reloc_type == DT_REL) __dl_print_rel_table(plt_reloc_cnt, plt_reloc_table, sym_table, str_table);
     else __dl_print_rela_table(plt_reloc_cnt, plt_reloc_table, sym_table, str_table);
+
+
+    // some tests
+    int fd = __dl_open("/etc/passwd", 0, O_RDONLY);
+    __dl_mmap((void*)0x0000000080000000ULL, 16, PROT_READ, MAP_PRIVATE, fd, 0);
+
+
     return 0;
 }
 
@@ -267,5 +275,4 @@ void __dl_print_rela_table(uint64_t rela_cnt, void *rela_table, Elf64_Sym *sym_t
         }
     }
 
-    // some tests
 }

@@ -19,11 +19,13 @@
 #define PROT_GROWSUP	0x02000000	/* mprotect flag: extend change to end of growsup vma */
 
 /* 0x01 - 0x03 are defined in linux/mman.h */
+#include <linux/mman.h>
 #define MAP_TYPE	0x0f		/* Mask for type of mapping */
 #define MAP_FIXED	0x10		/* Interpret addr exactly */
 #define MAP_ANONYMOUS	0x20		/* don't use a file */
 
 /* 0x0100 - 0x4000 flags are defined in asm-generic/mman.h */
+#include <asm-generic/mman.h>
 #define MAP_POPULATE		0x008000	/* populate (prefault) pagetables */
 #define MAP_NONBLOCK		0x010000	/* do not block on IO */
 #define MAP_STACK		0x020000	/* give out an address that is best suited for process/thread stacks */

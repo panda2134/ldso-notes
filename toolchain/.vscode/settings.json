@@ -2,6 +2,10 @@
     "files.associations": {
         "syscall.h": "c",
         "unistd.h": "c",
-        "unistd_64.h": "c"
+        "unistd_64.h": "c",
+        "mman.h": "c",
+        "mman_ext.h": "c",
+        "mman-map-flags-generic.h": "c",
+        "mman-linux.h": "c"
     }
 }
