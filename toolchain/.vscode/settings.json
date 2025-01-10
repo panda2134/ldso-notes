@@ -6,6 +6,22 @@
         "mman.h": "c",
         "mman_ext.h": "c",
         "mman-map-flags-generic.h": "c",
-        "mman-linux.h": "c"
+        "mman-linux.h": "c",
+        "dynload.h": "c",
+        "stat.h": "c",
+        "utils.h": "c",
+        "fcntl.h": "c",
+        "stdint.h": "c",
+        "auxv.h": "c",
+        "elf.h": "c",
+        "cdefs.h": "c",
+        "hwcap.h": "c",
+        "types.h": "c",
+        "wordsize.h": "c",
+        "features.h": "c",
+        "stddef.h": "c",
+        "stdbool.h": "c",
+        "main.h": "c",
+        "syscalls.h": "c"
     }
 }

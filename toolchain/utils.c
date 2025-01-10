@@ -1,4 +1,6 @@
 #include "utils.h"
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 hidden noplt void __dl_stdout_fputs_s(char *buf, size_t len) {
     asm volatile (
@@ -81,6 +83,13 @@ hidden noreturn noplt void __dl_die(char *msg) {
     __dl_exit(127);
 }
 
+hidden noreturn noplt void * __dl_memcpy(void* dest, const void* src, size_t n) {
+    char *d = dest;
+    const char *s = src;
+    for (size_t i = 0; i < n; i++) { d[i] = s[i]; }
+    return dest;
+}
+
 // Taken from https://maskray.me/blog/2022-08-21-glibc-and-dt-gnu-hash
 hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab) {
   uint32_t nbuckets = hashtab[0];
@@ -94,39 +103,4 @@ hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab) {
     while (chain[idx++] % 2 == 0);
   }
   return idx;
-}
-
-hidden noplt void * __dl_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
-    void *ret = 0;
-    asm volatile (
-        "movq %1, %%rdi;"
-        "movq %2, %%rsi;"
-        "movl %3, %%edx;"
-        "movl %4, %%r10d;"
-        "movl %5, %%r8d;"
-        "movq %6, %%r9;"
-        "movq $9, %%rax;" // SYS_mmap
-        "syscall;"
-        "movq %%rax, %0"
-        : "=r" (ret)
-        : "r" (addr), "r" (len), "r" (prot), "r" (flags), "r" (fd), "r" (off)
-        : "rcx", "r11", "rax"
-    );
-    return ret;
-}
-
-hidden noplt int __dl_open(const char *pathname, int flags, int mode) {
-    int ret = 0;
-    asm volatile (
-        "movq %1, %%rdi;"
-        "movl %2, %%esi;"
-        "movl %3, %%edx;"
-        "movq $2, %%rax;" // SYS_open
-        "syscall;"
-        "movl %%eax, %0"
-        : "=r" (ret)
-        : "r" (pathname), "r" (flags), "r" (mode)
-        : "rcx", "r11", "rax"
-    );
-    return ret;
 }

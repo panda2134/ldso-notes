@@ -1,10 +1,3 @@
-#include <stdint.h>
-#include <stdbool.h>
-#include "utils.h"
-#include "auxv.h"
-#include "elf.h"
-#include "mman.h"
-#include "fcntl.h"
 #include "main.h"
 
 // The _start function should be the first function in main.c. It is the entry point of dynamic linker.
@@ -109,8 +102,13 @@ hidden noplt int _start_c(void* sp) {
     // If we need to load the target executable on our own, we'll have to move ld.so around if necessary.
     // Otherwise the kernel ELF loader would have done that for us.
     if (direct_invoke) {
-        
-        __dl_die("Direct invokation not supported yet, because we haven't implemented code moving ld.so around");
+        if (argc != 2) {
+            __dl_die("Usage: ./ld.my.so execname");
+        }
+        int fd = __dl_open(argv[1], O_RDONLY, 0);
+        __dl_puts("Loading target exec... ");
+        phdr_val = __dl_loadelf(fd, &phnum);
+        phent = sizeof(Elf64_Phdr);
     }
     // Then, we go through relocation tables. The following code may be reused for loading shared objects.
     // We first find out the base address of the executable.
@@ -191,13 +189,13 @@ hidden noplt int _start_c(void* sp) {
                 __dl_puts(str_table + p->d_un.d_val);
                 break;
             case DT_REL:
-                rel_table = (void*) p->d_un.d_ptr;
+                rel_table = (void*) (exec_base + p->d_un.d_ptr);
                 break;
             case DT_RELSZ:
                 rel_cnt = p->d_un.d_val / sizeof(Elf64_Rel);
                 break;
             case DT_RELA:
-                rela_table = (void*) p->d_un.d_ptr;
+                rela_table = (void*) (exec_base + p->d_un.d_ptr);
                 break;
             case DT_RELASZ:
                 rela_cnt = p->d_un.d_val / sizeof(Elf64_Rela);
@@ -209,7 +207,7 @@ hidden noplt int _start_c(void* sp) {
                 plt_reloc_size = p->d_un.d_val;
                 break;
             case DT_JMPREL:
-                plt_reloc_table = (void*) p->d_un.d_ptr;
+                plt_reloc_table = (void*) (exec_base + p->d_un.d_ptr);
                 break;
         }
     }
@@ -227,9 +225,7 @@ hidden noplt int _start_c(void* sp) {
 
 
     // some tests
-    int fd = __dl_open("/etc/passwd", 0, O_RDONLY);
-    __dl_mmap((void*)0x0000000080000000ULL, 16, PROT_READ, MAP_PRIVATE, fd, 0);
-
+    
 
     return 0;
 }
