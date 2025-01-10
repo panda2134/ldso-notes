@@ -36,7 +36,7 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
     uint64_t lowaddr = 0xffffffffffffffff, highaddr = 0;
     for (int64_t i = 0; i < *phnum; i++) {
         Elf64_Phdr *e = phdr + i;
-        if (e->p_memsz != 0) {
+        if (e->p_type == PT_LOAD) {
             if (lowaddr > e->p_vaddr) lowaddr = e->p_vaddr;
             if (highaddr < (e->p_vaddr + e->p_memsz)) highaddr = (e->p_vaddr + e->p_memsz);
         }
