@@ -50,14 +50,20 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
     // Otherwise, it can be loaded everywhere.
     // Use anonymous MMAP to reserve the whole range, then map segments according to program header table.
     // Afterward, unmap the program header table.
+    uint64_t lowaddr_aligned = lowaddr & ~0xfff;
+    uint64_t lowaddr_align_diff = lowaddr & 0xfff;
     void *m = 0;
     if (elf_type == ET_DYN){
-        m = __dl_mmap(0, mmap_size, PROT_READ, MAP_PRIVATE | MAP_ANON, -1, 0);
+        __dl_puts("ET_DYN found");
+        // assert that lowaddr_aligned is always 0 in PIE / PIC;
+        // this assumption is used to locate program header later.
+        if (lowaddr_aligned) __dl_die("ET_DYN's lowest load address is not in page 0");
+        m = __dl_mmap((void*)0x800000000, mmap_size + lowaddr_align_diff, PROT_READ, MAP_PRIVATE | MAP_ANON, -1, 0);
     } else if (elf_type == ET_EXEC) {
-        uint64_t lowaddr_aligned = lowaddr & ~0xfff;
+        __dl_puts("ET_EXEC found");
         m = __dl_mmap(
             (void*)lowaddr_aligned,
-            mmap_size + (lowaddr - lowaddr_aligned),
+            mmap_size + lowaddr_align_diff,
             PROT_READ,
             MAP_PRIVATE | MAP_ANON | MAP_FIXED_NOREPLACE,
             -1, 0);
@@ -66,7 +72,9 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
         __dl_die("found unsupported ELF type");
     }
     if (m == (void*)-1) __dl_die("anonymous mmap reservation failed");
-    uint64_t exec_base = (uint64_t)m - lowaddr;
+    uint64_t exec_base = (uint64_t)m - lowaddr_aligned;
+    if (exec_base & 0xfff) __dl_die("exec_base not 4k-aligned");
+    __dl_stdout_fputs("load base in loadelf: "); __dl_print_hex(exec_base);
 
     void* new_phdr_addr = 0;
     for (int64_t i = 0; i < *phnum; i++) {
@@ -82,7 +90,7 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
         off_t offset_aligned = e->p_offset & ~0xfff;
         off_t align_diff = (e->p_offset - offset_aligned);
 
-        // __dl_stdout_fputs("Mapping offset (aligned) "); __dl_print_hex(offset_aligned);
+        __dl_stdout_fputs("Mapping offset (aligned) "); __dl_print_hex(offset_aligned);
         void *r = __dl_mmap(
             (void*)(exec_base + e->p_vaddr - align_diff),
             e->p_filesz + align_diff,
@@ -103,6 +111,10 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
             new_phdr_addr = (void*)(exec_base + e->p_vaddr);
             break;
         }
+    }
+    if (new_phdr_addr == 0) {
+        // no PT_PHDR; we will have to guess PHDR address
+        new_phdr_addr = (void*)(exec_base + phoff);
     }
     int err = __dl_munmap(phdr_aligned, (*phnum) * sizeof(Elf64_Phdr)); // unmap old phdr
     if (err) __dl_die("unmap old phdr failed");

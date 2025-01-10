@@ -106,6 +106,7 @@ hidden noplt int _start_c(void* sp) {
             __dl_die("Usage: ./ld.my.so execname");
         }
         int fd = __dl_open(argv[1], O_RDONLY, 0);
+        if (fd < 0) __dl_die("Exec file not found");
         __dl_puts("Loading target exec... ");
         phdr_val = __dl_loadelf(fd, &phnum);
         phent = sizeof(Elf64_Phdr);
@@ -224,9 +225,16 @@ hidden noplt int _start_c(void* sp) {
     else __dl_print_rela_table(plt_reloc_cnt, plt_reloc_table, sym_table, str_table);
 
 
-    // some tests
-    
-
+    // tests on loading shared object
+    {
+        int fd = __dl_open("./tests/libtester.so", O_RDONLY, 0);
+        if (fd < 0) __dl_die("so file not found");
+        __dl_puts("Loading target so... ");
+        int64_t phnum;
+        void* phdr_val = __dl_loadelf(fd, &phnum);
+        Elf64_Phdr *p = phdr_val;
+        while (phnum--) __dl_print_hex((p++)->p_type);
+    }
     return 0;
 }
 
