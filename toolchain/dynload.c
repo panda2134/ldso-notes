@@ -1,4 +1,7 @@
 #include "dynload.h"
+#include <sys/fcntl.h>
+#include <linux/limits.h>
+
 // Check if ELF header is valid.
 hidden noplt bool __dl_checkelf(Elf64_Ehdr *ehdr) {
     return ehdr->e_ident[0] == ELFMAG0
@@ -14,27 +17,44 @@ hidden noplt bool __dl_checkelf(Elf64_Ehdr *ehdr) {
 }
 
 // Uses mmap to map segments of ELF into memory.
-// Returns the phdr address.
+// Returns true when load succeeded, and false when load failed.
 // TODO: support ASLR
-hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
+hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
+    DlElfInfo *ret = __dl_malloc(sizeof(DlElfInfo));
+
+    struct stat statbuf;
+    if (__dl_stat(path, &statbuf) != 0) {
+        __dl_stdout_fputs("stat() failed: "); __dl_puts(path);
+        return 0;
+    }
+    ret->dev = statbuf.st_dev; ret->ino = statbuf.st_ino;
+
+    int fd = __dl_open(path, O_RDONLY, 0);
+    if (fd < 0) {
+        __dl_stdout_fputs("ERROR: open() failed: "); __dl_puts(path);
+        return 0;
+    }
+    
     // Read program header info from ELF header.
     Elf64_Ehdr *ehdr = __dl_mmap(0, sizeof(Elf64_Ehdr), PROT_READ, MAP_PRIVATE, fd, 0);
     if ((ehdr == (void*)-1) || !__dl_checkelf(ehdr)) {
-        __dl_die("Ehdr invalid");
+        __dl_stdout_fputs("ERROR: Ehdr invalid: "); __dl_puts(path);
+        return 0;
     }
     uint16_t elf_type = ehdr->e_type;
     off_t phoff = ehdr->e_phoff;
-    *phnum = ehdr->e_phnum;
+    ret->elf_type = ehdr->e_type;
+    ret->phnum = ehdr->e_phnum;
     __dl_munmap(ehdr, sizeof(Elf64_Ehdr));
 
     // Calculate total size of memory image
     off_t phoff_aligned = phoff & ~0xfff;
     off_t ph_align_diff =  (phoff - phoff_aligned);
-    void *phdr_aligned = __dl_mmap(0, (*phnum) * sizeof(Elf64_Phdr) + ph_align_diff, PROT_READ, MAP_PRIVATE, fd, phoff_aligned);
+    void *phdr_aligned = __dl_mmap(0, (ret->phnum) * sizeof(Elf64_Phdr) + ph_align_diff, PROT_READ, MAP_PRIVATE, fd, phoff_aligned);
     if (phdr_aligned == (void*)-1) __dl_die("phdr mmap failed");
     Elf64_Phdr *phdr = (void*)((char*)phdr_aligned + ph_align_diff);
     uint64_t lowaddr = 0xffffffffffffffff, highaddr = 0;
-    for (int64_t i = 0; i < *phnum; i++) {
+    for (int64_t i = 0; i < ret->phnum; i++) {
         Elf64_Phdr *e = phdr + i;
         if (e->p_type == PT_LOAD) {
             if (lowaddr > e->p_vaddr) lowaddr = e->p_vaddr;
@@ -42,7 +62,8 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
         }
     }
     if (lowaddr >= highaddr) {
-        __dl_die("MMap range is wrong");
+        __dl_stdout_fputs("ERROR: Ehdr invalid: "); __dl_puts(path);
+        return false;
     }
     uint64_t mmap_size = highaddr - lowaddr;
 
@@ -57,10 +78,15 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
         __dl_puts("ET_DYN found");
         // assert that lowaddr_aligned is always 0 in PIE / PIC;
         // this assumption is used to locate program header later.
-        if (lowaddr_aligned) __dl_die("ET_DYN's lowest load address is not in page 0");
+        if (lowaddr_aligned != 0) {
+            __dl_stdout_fputs("ERROR: ET_DYN's lowest load address is not in page 0: "); __dl_puts(path);
+            return false;
+        }
         m = __dl_mmap((void*)0x800000000, mmap_size + lowaddr_align_diff, PROT_READ, MAP_PRIVATE | MAP_ANON, -1, 0);
     } else if (elf_type == ET_EXEC) {
         __dl_puts("ET_EXEC found");
+        // We're not doing self relocation. if mmap fails here, that would be because the executable
+        // collides with ld.so in the memory image.
         m = __dl_mmap(
             (void*)lowaddr_aligned,
             mmap_size + lowaddr_align_diff,
@@ -69,15 +95,15 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
             -1, 0);
     } else {
         __dl_stdout_fputs("ELF Type = "); __dl_print_int(elf_type);
-        __dl_die("found unsupported ELF type");
+        __dl_stdout_fputs("ERROR: found unsupported ELF type: "); __dl_puts(path);
+        return 0;
     }
     if (m == (void*)-1) __dl_die("anonymous mmap reservation failed");
-    uint64_t exec_base = (uint64_t)m - lowaddr_aligned;
-    if (exec_base & 0xfff) __dl_die("exec_base not 4k-aligned");
-    __dl_stdout_fputs("load base in loadelf: "); __dl_print_hex(exec_base);
+    ret->base = (uint64_t)m - lowaddr_aligned;
+    if (ret->base & 0xfff) __dl_die("ret->base not 4k-aligned");
 
-    void* new_phdr_addr = 0;
-    for (int64_t i = 0; i < *phnum; i++) {
+    ret->ph = 0;
+    for (int64_t i = 0; i < ret->phnum; i++) {
         Elf64_Phdr *e = phdr + i;
         if (e->p_memsz == 0) continue;
         if (e->p_type != PT_LOAD || e->p_align != 0x1000) continue; // Only handle PT_LOAD that is 4k-aligned
@@ -90,9 +116,9 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
         off_t offset_aligned = e->p_offset & ~0xfff;
         off_t align_diff = (e->p_offset - offset_aligned);
 
-        __dl_stdout_fputs("Mapping offset (aligned) "); __dl_print_hex(offset_aligned);
+        // __dl_stdout_fputs("Mapping offset (aligned) "); __dl_print_hex(offset_aligned);
         void *r = __dl_mmap(
-            (void*)(exec_base + e->p_vaddr - align_diff),
+            (void*)(ret->base + e->p_vaddr - align_diff),
             e->p_filesz + align_diff,
             prot,
             MAP_PRIVATE | MAP_FIXED,
@@ -105,18 +131,65 @@ hidden noplt void* __dl_loadelf(int fd, int64_t* phnum) {
 
     }
 
-    for (int64_t i = 0; i < *phnum; i++) {
+    for (int64_t i = 0; i < ret->phnum; i++) {
         Elf64_Phdr *e = phdr + i;
         if (e->p_type == PT_PHDR) {
-            new_phdr_addr = (void*)(exec_base + e->p_vaddr);
+            ret->ph = (void*)(ret->base + e->p_vaddr);
             break;
         }
     }
-    if (new_phdr_addr == 0) {
+    if (ret->ph == 0) {
         // no PT_PHDR; we will have to guess PHDR address
-        new_phdr_addr = (void*)(exec_base + phoff);
+        ret->ph = (void*)(ret->base + phoff);
     }
-    int err = __dl_munmap(phdr_aligned, (*phnum) * sizeof(Elf64_Phdr)); // unmap old phdr
+    int err = __dl_munmap(phdr_aligned, (ret->phnum) * sizeof(Elf64_Phdr)); // unmap old phdr
     if (err) __dl_die("unmap old phdr failed");
-    return new_phdr_addr;
+
+    if (!__dl_loadelf_extras(ret)) return 0;
+
+    return ret;
+}
+
+hidden noplt bool __dl_loadelf_extras(DlElfInfo *ret) {
+    // next, parse DT_NEEDED items, etc.
+    // find the dynamic section by locating DYNAMIC segment.
+    for (int64_t i = 0; i < ret->phnum; i++) {
+        Elf64_Phdr *e = ret->ph + i;
+        if (e->p_type == PT_DYNAMIC) {
+            ret->dyn = (void*)(ret->base + e->p_vaddr);
+            break;
+        }
+    }
+
+    uint64_t dynv[DT_NUM];
+    __dl_parse_dyn(ret->dyn, dynv);
+
+    ret->str_table = (void*)(ret->base + dynv[DT_STRTAB]);
+    ret->sym_table = (void*)(ret->base + dynv[DT_SYMTAB]);
+    ret->runpath = ret->str_table + dynv[DT_RUNPATH];
+
+    // MallocInfo info; // LEAK: this will be thrown away later.
+    // __dl_memset(&info, 0, sizeof(MallocInfo));
+    SLNode **deps_tail = &(ret->dep_names);
+    for (Elf64_Dyn *p = ret->dyn; p->d_tag; p++) {
+        if (p->d_tag == DT_NEEDED) {
+            // Found dependency; insert into linked list
+            SL_APPEND(ret->str_table + p->d_un.d_val, deps_tail);
+        }
+    }
+
+    // Last but not least: mark as the end of linked list (we're returning only one element).
+    ret->next = 0;
+
+    return true;
+}
+
+// Map dyn items into array dynv indexed by DT_ tags. dynv[] has to be at least DT_NUM elements long.
+// Extended tags like DT_GNU_HASH are ignored.
+hidden noplt void __dl_parse_dyn(Elf64_Dyn *dyn, uint64_t dynv[]) {
+    for (int i = 0; i < DT_NUM; i++) dynv[i] = 0;
+    for (Elf64_Dyn *p = dyn; p->d_tag; p++) {
+        if (p->d_tag >= DT_NUM) continue;
+        dynv[p->d_tag] = (uint64_t) p->d_un.d_val;
+    }
 }

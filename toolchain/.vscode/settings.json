@@ -22,6 +22,7 @@
         "stddef.h": "c",
         "stdbool.h": "c",
         "main.h": "c",
-        "syscalls.h": "c"
+        "syscalls.h": "c",
+        "malloc.h": "c"
     }
 }

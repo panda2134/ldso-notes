@@ -1,8 +1,8 @@
 #include "utils.h"
-#include <sys/mman.h>
-#include <sys/stat.h>
+#include "malloc.h"
+#include "stdbool.h"
 
-hidden noplt void __dl_stdout_fputs_s(char *buf, size_t len) {
+hidden noplt void __dl_stdout_fputs_s(const char *buf, size_t len) {
     asm volatile (
         "movq $1, %%rax;" /* write */
         "movq $1, %%rdi;" /* stdout */
@@ -17,17 +17,17 @@ hidden noplt void __dl_stdout_fputs_s(char *buf, size_t len) {
 }
 
 
-hidden noplt void __dl_stdout_fputs(char *buf) {
+hidden noplt void __dl_stdout_fputs(const char *buf) {
     __dl_stdout_fputs_s(buf, __dl_strlen(buf));
 }
 
-hidden noplt size_t __dl_strlen(char *buf) {
+hidden noplt size_t __dl_strlen(const char *buf) {
     size_t j = 0;
     for (; *buf; buf++, j++);
     return j;
 }
 
-hidden noplt void __dl_puts(char *buf) {
+hidden noplt void __dl_puts(const char *buf) {
     __dl_stdout_fputs_s(buf, __dl_strlen(buf));
     __dl_stdout_fputs_s("\n", 1);
 }
@@ -83,11 +83,56 @@ hidden noreturn noplt void __dl_die(char *msg) {
     __dl_exit(127);
 }
 
-hidden noreturn noplt void * __dl_memcpy(void* dest, const void* src, size_t n) {
+hidden noplt void * __dl_memset(void* s, int c, size_t n) {
+    char* s1 = s;
+    for (; n; n--, s1++) *s1 = 0;
+    return s;
+}
+
+hidden noplt void * __dl_memcpy(void* dest, const void* src, size_t n) {
     char *d = dest;
     const char *s = src;
     for (size_t i = 0; i < n; i++) { d[i] = s[i]; }
     return dest;
+}
+
+hidden noplt int __dl_strcmp(const char *a, const char *b) {
+    for (; *a && *a == *b; a++, b++);
+    return *a - *b;
+}
+
+hidden noplt int __dl_strncmp(const char *a, const char *b, size_t n) {
+    for (; n > 0 && *a && *a == *b; a++, b++, n--);
+    return n ? (*a - *b) : 0;
+}
+
+hidden noplt SLNode* __dl_parse_comma_list(const char *s) {
+    SLNode *ret = 0;
+    SLNode **tail = &ret;
+    while (true) {
+        const char *t = s;
+        while (*t != '\0' && *t != ':') t++;
+
+        char *new_str = __dl_malloc(t-s+1);
+        for (size_t i = 0; i < t - s; i++) new_str[i] = s[i];
+        new_str[t-s] = '\0';
+        SL_APPEND(new_str, tail);
+
+        if (*t == ':') s = t + 1;
+        else break;
+    }
+    return ret;
+}
+
+// Taken from https://flapenguin.me/elf-dt-gnu-hash
+hidden noplt uint32_t __dl_gnu_hash(const char* name) {
+    uint32_t h = 5381;
+
+    for (; *name; name++) {
+        h = (h << 5) + h + *name;
+    }
+
+    return h;
 }
 
 // Taken from https://maskray.me/blog/2022-08-21-glibc-and-dt-gnu-hash

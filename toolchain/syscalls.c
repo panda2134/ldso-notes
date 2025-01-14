@@ -80,6 +80,21 @@ hidden noplt int __dl_close(int fd) {
     return ret;
 }
 
+hidden noplt int __dl_stat(const char* path, struct stat* buf) {
+    int ret = 0;
+    asm volatile (
+        "movq %1, %%rdi;"
+        "movq %2, %%rsi;"
+        "movq $4, %%rax;" // SYS_stat
+        "syscall;"
+        "movl %%eax, %0"
+        : "=r" (ret)
+        : "r" (path), "r" (buf)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
+
 hidden noplt int __dl_fstat(int fd, struct stat* buf) {
     int ret = 0;
     asm volatile (
@@ -90,6 +105,22 @@ hidden noplt int __dl_fstat(int fd, struct stat* buf) {
         "movl %%eax, %0"
         : "=r" (ret)
         : "r" (fd), "r" (buf)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
+
+hidden noplt int64_t __dl_readlink(const char *pathname, char *buf, size_t bufsize) {
+    int64_t ret = 0;
+    asm volatile (
+        "movq %1, %%rdi;"
+        "movq %2, %%rsi;"
+        "movq %3, %%rdx;"
+        "movq $89, %%rax;" // SYS_readlink
+        "syscall;"
+        "movq %%rax, %0"
+        : "=r" (ret)
+        : "r" (pathname), "r" (buf), "r" (bufsize)
         : "rcx", "r11", "rax"
     );
     return ret;
