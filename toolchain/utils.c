@@ -1,6 +1,8 @@
 #include "utils.h"
 #include "malloc.h"
 #include "stdbool.h"
+#include <elf.h>
+#include "dynload.h"
 
 hidden noplt void __dl_stdout_fputs_s(const char *buf, size_t len) {
     asm volatile (
@@ -148,4 +150,53 @@ hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab) {
     while (chain[idx++] % 2 == 0);
   }
   return idx;
+}
+
+// Adapted from https://flapenguin.me/elf-dt-gnu-hash
+hidden noplt const Elf64_Sym* __dl_gnu_lookup(DlElfInfo* elf, const char* name) {
+    const uint32_t namehash = __dl_gnu_hash(name);
+
+    const uint32_t* hashtab = elf->gnu_hash_table;
+    if (!hashtab) return 0;
+    __dl_print_int(elf->ino);
+
+    const uint32_t nbuckets = hashtab[0];
+    const uint32_t symoffset = hashtab[1];
+    const uint32_t bloom_size = hashtab[2];
+    const uint32_t bloom_shift = hashtab[3];
+    const uint64_t* bloom = (void*)&hashtab[4];
+    const uint32_t* buckets = (void*)&bloom[bloom_size];
+    const uint32_t* chain = &buckets[nbuckets];
+
+    uint64_t word = bloom[(namehash / 64) % bloom_size];
+    uint64_t mask = 0
+        | 1ull << (namehash % 64)
+        | 1ull << ((namehash >> bloom_shift) % 64);
+
+    /* If at least one bit is not set, a symbol is surely missing. */
+    if ((word & mask) != mask) {
+        return 0;
+    }
+
+    uint32_t symix = buckets[namehash % nbuckets];
+    if (symix < symoffset) { // symbol information for 0..symoffset-1 is not included
+        return 0;
+    }
+
+    /* Loop through the chain. */
+    while (true) {
+        const char* symname = elf->str_table + elf->sym_table[symix].st_name;
+        const uint32_t hash = chain[symix - symoffset];
+
+        if ((namehash|1) == (hash|1) && __dl_strcmp(name, symname) == 0) {
+            return &elf->sym_table[symix];
+        }
+
+        /* Chain ends with an element with the lowest bit set to 1. */
+        if (hash & 1) break;
+
+        symix++;
+    }
+
+    return 0;
 }

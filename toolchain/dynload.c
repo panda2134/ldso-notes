@@ -1,4 +1,5 @@
 #include "dynload.h"
+#include "utils.h"
 #include <sys/fcntl.h>
 #include <linux/limits.h>
 
@@ -101,6 +102,7 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
     if (m == (void*)-1) __dl_die("anonymous mmap reservation failed");
     ret->base = (uint64_t)m - lowaddr_aligned;
     if (ret->base & 0xfff) __dl_die("ret->base not 4k-aligned");
+    ret->entry = (void*)(ret->base + ehdr->e_entry);
 
     ret->ph = 0;
     for (int64_t i = 0; i < ret->phnum; i++) {
@@ -162,10 +164,12 @@ hidden noplt bool __dl_loadelf_extras(DlElfInfo *ret) {
     }
 
     uint64_t dynv[DT_NUM];
+    __dl_memset(dynv, 0, sizeof(dynv));
     __dl_parse_dyn(ret->dyn, dynv);
 
     ret->str_table = (void*)(ret->base + dynv[DT_STRTAB]);
     ret->sym_table = (void*)(ret->base + dynv[DT_SYMTAB]);
+    if (dynv[DT_RPATH]) __dl_die("RPATH is no longer supported");
     ret->runpath = ret->str_table + dynv[DT_RUNPATH];
 
     // MallocInfo info; // LEAK: this will be thrown away later.
@@ -176,10 +180,12 @@ hidden noplt bool __dl_loadelf_extras(DlElfInfo *ret) {
             // Found dependency; insert into linked list
             SL_APPEND(ret->str_table + p->d_un.d_val, deps_tail);
         }
+        if (p->d_tag == DT_GNU_HASH) {
+            ret->gnu_hash_table = (void*)(ret->base + p->d_un.d_ptr);
+        }
     }
 
-    // Last but not least: mark as the end of linked list (we're returning only one element).
-    ret->next = 0;
+    ret->relocated = false;
 
     return true;
 }

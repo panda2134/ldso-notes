@@ -1,5 +1,6 @@
 #pragma once
-#include "utils.h"
+
+#include "defs.h"
 
 hidden noplt void * __dl_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 hidden noplt int __dl_munmap(void *addr, size_t len);

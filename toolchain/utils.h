@@ -1,22 +1,7 @@
 #pragma once
 
-#include <stdint.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-
-#define hidden __attribute__((hidden))
-#define noplt __attribute__((noplt))
-#define noreturn __attribute__((noreturn))
-
-typedef struct env_ld_config {
-    const char* preload;
-    const char* lib_path;
-} EnvLdConfig;
-
-typedef struct str_list_node {
-    const char* s;
-    struct str_list_node* next;
-} SLNode;
+#include "defs.h"
+#include "dynload.h"
 
 #define SL_APPEND(val, tail_ptr) do {\
             SLNode *node = __dl_malloc(sizeof(SLNode)); \
@@ -42,5 +27,6 @@ hidden noplt void *__dl_memcpy(void* dest, const void* src, size_t n);
 hidden noplt SLNode* __dl_parse_comma_list(const char *s);
 hidden noplt uint32_t __dl_gnu_hash(const char* name);
 hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab);
+hidden noplt const Elf64_Sym* __dl_gnu_lookup(struct dl_elf_info *elf, const char* name);
 
 hidden noreturn noplt void __dl_die(char *msg);

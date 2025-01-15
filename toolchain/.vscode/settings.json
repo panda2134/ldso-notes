@@ -23,6 +23,9 @@
         "stdbool.h": "c",
         "main.h": "c",
         "syscalls.h": "c",
-        "malloc.h": "c"
+        "malloc.h": "c",
+        "walkdyn.h": "c",
+        "defs.h": "c",
+        "compare": "c"
     }
 }

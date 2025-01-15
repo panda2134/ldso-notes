@@ -3,6 +3,9 @@
 extern int a;
 
 void _start() {
+    print_hex(a);
+    print_hex(foo());
     a = 2;
-    foo();
+    print_hex(a);
+    print_hex(foo());
 }

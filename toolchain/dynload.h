@@ -1,11 +1,18 @@
 #pragma once
-#include "utils.h"
+
 #include "syscalls.h"
 #include "malloc.h"
+#include "defs.h"
 #include <stdbool.h>
 #include <elf.h>
 #include <sys/types.h>
 
+
+typedef struct dl_file_info {
+    dev_t dev;
+    ino_t ino;
+    struct dl_file_info *next;
+} DlFileInfo;
 
 typedef struct dl_elf_info {
     dev_t dev;
@@ -21,15 +28,19 @@ typedef struct dl_elf_info {
     char *str_table;
     Elf64_Sym *sym_table;
     char *runpath;
+    void* gnu_hash_table;
 
-    struct dl_elf_info *dep_elfs;
-    struct dl_elf_info *next;
+    DlFileInfo *deps;
+    bool relocated;
+    void (*entry)(int argc, char **argv);
 } DlElfInfo;
 
-#define DL_APPEND_NODE(node, tail_ptr) do {\
-            node->next = 0; \
-            *tail_ptr = node; \
-            tail_ptr = &(node->next); \
+#define DL_FILE_APPEND_NODE(dev_v, ino_v, tail_ptr) do {\
+            DlFileInfo *__node = __dl_malloc(sizeof(DlFileInfo));\
+            __node->dev = dev_v; __node->ino = ino_v;\
+            __node->next = 0; \
+            *tail_ptr = __node; \
+            tail_ptr = &(__node->next); \
 } while (0)
 
 hidden noplt bool __dl_checkelf(Elf64_Ehdr *ehdr);
