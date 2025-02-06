@@ -21,6 +21,7 @@ hidden noplt bool __dl_checkelf(Elf64_Ehdr *ehdr) {
 // Returns true when load succeeded, and false when load failed.
 // TODO: support ASLR
 hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
+    __dl_stdout_fputs("Loading ELF at "); __dl_puts(path);
     DlElfInfo *ret = __dl_malloc(sizeof(DlElfInfo));
 
     struct stat statbuf;
@@ -35,7 +36,7 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
         __dl_stdout_fputs("ERROR: open() failed: "); __dl_puts(path);
         return 0;
     }
-    
+
     // Read program header info from ELF header.
     Elf64_Ehdr *ehdr = __dl_mmap(0, sizeof(Elf64_Ehdr), PROT_READ, MAP_PRIVATE, fd, 0);
     if ((ehdr == (void*)-1) || !__dl_checkelf(ehdr)) {
@@ -101,6 +102,7 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
     }
     if (m == (void*)-1) __dl_die("anonymous mmap reservation failed");
     ret->base = (uint64_t)m - lowaddr_aligned;
+    __dl_stdout_fputs("Reserved memory at "); __dl_print_hex(ret->base);
     if (ret->base & 0xfff) __dl_die("ret->base not 4k-aligned");
     ret->entry = (void*)(ret->base + ehdr->e_entry);
 
@@ -128,7 +130,7 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
             offset_aligned
         );
         if (!r) __dl_die("segment mmap failed");
-        int err = __dl_mprotect(r, e->p_memsz + align_diff, prot); 
+        int err = __dl_mprotect(r, e->p_memsz + align_diff, prot);
         if (err) __dl_die("mprotect failed");
 
     }
@@ -146,6 +148,8 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
     }
     int err = __dl_munmap(phdr_aligned, (ret->phnum) * sizeof(Elf64_Phdr)); // unmap old phdr
     if (err) __dl_die("unmap old phdr failed");
+
+    ret->load_path = path;
 
     if (!__dl_loadelf_extras(ret)) return 0;
 

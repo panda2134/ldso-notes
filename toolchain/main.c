@@ -1,6 +1,14 @@
 #include "main.h"
+#include "utils.h"
+#include "syscall.h"
 #include "walkdyn.h"
+#include "global.h"
+#include <elf.h>
 #include <linux/limits.h>
+
+static uint64_t dynv[DT_NUM];
+static DlElfInfo *exec = 0;
+static int ret_code = 0;
 
 // The _start function should be the first function in main.c. It is the entry point of dynamic linker.
 // Do not move it around, as its address is used for detecting self-relocation.
@@ -10,20 +18,28 @@ noreturn void _start() {
         "mov %%rsp, %%rdi;"
         "add $0x8, %%rdi;"
         "call _start_c;"   // Passes control to _start_c
-        "xorq %%rdi, %%rdi;"
-        "movl %%eax, %%edi;"
-        "movq $60, %%rax;" // SYS_exit
-        "syscall;"
         :
         :
         : "rdi", "rax"
     );
+    run_init();
+    __dl_puts("Let's take over the world!");
+    asm volatile ("mov $0, %%rbp;"
+        "add $0x8, %%rsp;"
+        "jmp *%0;"
+        :: "m"(exec->entry));
+    /*
+    I've fixed the stack layout and symbol search of ld.so global data.
+    However, __init_ssp depends on pthread_self. We will have to work around this.
+    */
 }
 
-hidden noplt int _start_c(void* sp) {
+hidden noplt void _start_c(void* sp) {
+    __dl_stdout_fputs("Stack pointer = "); __dl_print_hex((uint64_t)sp);
     size_t argc = *(size_t*)sp;
     char** argv = (void*)((char*)sp + 8);
-    __dl_stdout_fputs("Arguments:");
+    __dl_print_int(argc);
+    __dl_stdout_fputs("Arguments: ");
     for (int i = 0; i < argc; i++) {
         __dl_stdout_fputs(argv[i]);
         __dl_stdout_fputs(" ");
@@ -34,6 +50,7 @@ hidden noplt int _start_c(void* sp) {
     char** envp = argv + (argc + 1);
     EnvLdConfig conf;
     conf.lib_path = conf.preload = 0;
+    __environ = envp;
     for (; *envp; envp++) {
         // Jump through all environs
         // We need to look for LD_PRELOAD / LD_LIBRARY_PATH
@@ -85,7 +102,7 @@ hidden noplt int _start_c(void* sp) {
 
     __dl_stdout_fputs(" AT_PHNUM:");
     __dl_print_int(at_phnum);
-    
+
     __dl_stdout_fputs(" AT_BASE:");
     __dl_print_hex((uint64_t) at_ldso_base);
     __dl_puts("END");
@@ -112,8 +129,6 @@ hidden noplt int _start_c(void* sp) {
     // otherwise, ld.so is load by kernel and its base address is already available.
     __dl_stdout_fputs(" ld.so base = "); __dl_print_hex((uint64_t)at_ldso_base);
 
-    DlElfInfo *exec = 0;
-    
     // If we need to load the target executable on our own, we'll have to move ld.so around if necessary.
     // Otherwise the kernel ELF loader would have done that for us.
     if (direct_invoke) {
@@ -132,13 +147,13 @@ hidden noplt int _start_c(void* sp) {
         struct stat statbuf;
         if (__dl_stat(at_execfn, &statbuf) != 0) {
             __dl_stdout_fputs("stat() failed: "); __dl_puts(at_execfn);
-            return 0;
+            __dl_die("cannot find executable");
         }
         exec->dev = statbuf.st_dev; exec->ino = statbuf.st_ino;
         __dl_stdout_fputs("EXECFN (dev,ino): ");
         __dl_print_int(exec->dev);
         __dl_print_int(exec->ino);
-        
+
         // Find out base address using entry 0 in program header (segment) table.
         exec->base = 0;
         for (int64_t i = 0; i < exec->phnum; i++) {
@@ -159,7 +174,6 @@ hidden noplt int _start_c(void* sp) {
     // Parse the dynamic section to get the relocation tables and symbol tables.
     // To perform the relocation, we need to learn about symbol names. Thus symbol tables are needed.
     // Ref: https://refspecs.linuxbase.org/elf/gabi4+/ch5.dynamic.html#dynamic_section
-    uint64_t dynv[DT_NUM];
     __dl_parse_dyn(dyn, dynv);
     char *str_table = exec->str_table;
     void* gnu_hashtab = 0;
@@ -170,24 +184,23 @@ hidden noplt int _start_c(void* sp) {
         }
     }
     if (dynv[DT_FLAGS] & DF_TEXTREL) {
-        __dl_puts("ERROR: text relocation is unsupported");
-        return 1;
+        __dl_die("text relocation is unsupported");
     }
     uint32_t symbol_num = __dl_gnu_hash_get_num_syms(gnu_hashtab);
     // show symbols defined
     Elf64_Sym *sym = exec->sym_table, *sym_table = exec->sym_table;
-    for (uint32_t i = symbol_num; i; i--, sym++) {
-        __dl_stdout_fputs("==> Symbol name: ");
-        if (sym->st_name) {
-            __dl_puts(str_table + sym->st_name);
-        } else {
-            __dl_puts("[NO NAME]");
-        }
-        __dl_stdout_fputs("    Symbol value: ");
-        __dl_print_hex(sym->st_value);
-        __dl_stdout_fputs("    Symbol size: ");
-        __dl_print_int(sym->st_size);
-    }
+    // for (uint32_t i = symbol_num; i; i--, sym++) {
+    //     __dl_stdout_fputs("==> Symbol name: ");
+    //     if (sym->st_name) {
+    //         __dl_puts(str_table + sym->st_name);
+    //     } else {
+    //         __dl_puts("[NO NAME]");
+    //     }
+    //     __dl_stdout_fputs("    Symbol value: ");
+    //     __dl_print_hex(sym->st_value);
+    //     __dl_stdout_fputs("    Symbol size: ");
+    //     __dl_print_int(sym->st_size);
+    // }
     // TODO: parse the GNU_HASH hashtable for symbols
 
     // multiple DT_NEEDED entries may exist
@@ -208,61 +221,40 @@ hidden noplt int _start_c(void* sp) {
     void * plt_reloc_table = (void*) (exec->base + dynv[DT_JMPREL]);
 
     DlInfoHTNode ** dlinfo_ht = __dl_malloc(sizeof(DlInfoHTNode*) * DLINFO_HT_LEN);
-    __dl_puts("before rec load");
     DlRecResult res = __dl_recursive_load_all(exec, &conf, dlinfo_ht);
-    __dl_puts("after rec load");
+    __dl_puts("Recursive loading done.");
 
     for (DlFileInfo *elf_file = res.topo_list; elf_file; elf_file = elf_file->next) {
         DlElfInfo *elf = __dl_ht_lookup(dlinfo_ht, DLINFO_HT_LEN, elf_file->dev, elf_file->ino);
-        __dl_puts("before reloc");
         __dl_relocate(elf, dlinfo_ht, res.preload_list, exec);
     }
+    __dl_puts("Relocation done.");
 
-    // TODO: init / fini
-    exec->entry(argc, argv);
-
-    return 0;
+    __dl_stdout_fputs("Stack pointer = "); __dl_print_hex((uint64_t)sp);
 }
 
-void __dl_print_rel_table(uint64_t rel_cnt, void *rel_table, Elf64_Sym *sym_table, char *str_table)
-{
-    __dl_stdout_fputs("REL relocation entries: count = ");
-    __dl_print_int(rel_cnt);
-    if (rel_table != 0)
-    {
-        uint64_t r = rel_cnt;
-        for (Elf64_Rel *entry = rel_table; r; entry++, r--)
-        {
-            __dl_stdout_fputs("==> Offset: ");
-            __dl_print_hex(entry->r_offset);
-            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
-            __dl_stdout_fputs("==> Sym: ");
-            __dl_puts(str_table + (sym_table + reloc_sym)->st_name);
-            __dl_stdout_fputs("==> Type: ");
-            __dl_print_hex(reloc_type);
+hidden noplt void run_init() {
+    void (*fn)() = (void*) dynv[DT_INIT];
+    if (fn != 0) fn();
+    for (uint64_t i = 0; i < dynv[DT_INIT_ARRAYSZ]; i += sizeof(void*)) {
+        uint64_t init_addr = *(uint64_t*)(dynv[DT_INIT_ARRAY] + i);
+        if (init_addr != 0 && init_addr != (uint64_t)-1) {
+            fn = (void*) init_addr;
+            fn();
         }
     }
 }
 
-void __dl_print_rela_table(uint64_t rela_cnt, void *rela_table, Elf64_Sym *sym_table, char *str_table)
-{
-    __dl_stdout_fputs("RELA relocation entries: count = ");
-    __dl_print_int(rela_cnt);
-    if (rela_table != 0)
-    {
-        uint64_t r = rela_cnt;
-        for (Elf64_Rela *entry = rela_table; r; entry++, r--)
-        {
-            __dl_stdout_fputs("==> Offset: ");
-            __dl_print_hex(entry->r_offset);
-            __dl_stdout_fputs("==> Addend: ");
-            __dl_print_hex(entry->r_addend);
-            uint64_t reloc_sym = ELF64_R_SYM(entry->r_info), reloc_type = ELF64_R_TYPE(entry->r_info);
-            __dl_stdout_fputs("==> Sym: ");
-            __dl_puts(str_table + (sym_table + reloc_sym)->st_name);
-            __dl_stdout_fputs("==> Type: ");
-            __dl_print_hex(reloc_type);
+hidden noplt void run_fini() {
+    void (*fn)() = (void*) dynv[DT_FINI];
+    for (uint64_t i = 0; i < dynv[DT_FINI_ARRAYSZ]; i += sizeof(void*)) {
+        uint64_t fini_addr = *(uint64_t*)(dynv[DT_FINI_ARRAY] + dynv[DT_FINI_ARRAYSZ] - i - sizeof(void*));
+
+        if (fini_addr != 0 && fini_addr != (uint64_t)-1) {
+            fn = (void*) fini_addr;
+            fn();
         }
     }
-
+    fn = (void*) dynv[DT_FINI];
+    if (fn != 0) fn();
 }

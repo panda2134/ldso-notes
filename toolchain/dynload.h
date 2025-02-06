@@ -29,10 +29,11 @@ typedef struct dl_elf_info {
     Elf64_Sym *sym_table;
     char *runpath;
     void* gnu_hash_table;
+    const char *load_path; // for debugging only! can be null
 
     DlFileInfo *deps;
     bool relocated;
-    void (*entry)(int argc, char **argv);
+    int (*entry)();
 } DlElfInfo;
 
 #define DL_FILE_APPEND_NODE(dev_v, ino_v, tail_ptr) do {\

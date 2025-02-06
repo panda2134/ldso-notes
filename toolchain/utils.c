@@ -10,7 +10,7 @@ hidden noplt void __dl_stdout_fputs_s(const char *buf, size_t len) {
         "movq $1, %%rdi;" /* stdout */
         "movq %0, %%rsi;"
         "movq %1, %%rdx;"
-        "syscall" 
+        "syscall"
         :
         : "r"(buf), "r"(len)
         : "rax", "rdi", "rsi", "rdx"
@@ -67,7 +67,8 @@ hidden noplt void __dl_print_hex(uint64_t n) {
     __dl_puts(s);
 }
 
-hidden noreturn noplt void __dl_exit(uint32_t code) {
+__attribute__((always_inline))
+inline void __dl_exit(uint32_t code) {
     asm volatile (
         "xorq %%rdi, %%rdi;"
         "movl %0, %%edi;"
@@ -79,10 +80,21 @@ hidden noreturn noplt void __dl_exit(uint32_t code) {
     );
 }
 
-hidden noreturn noplt void __dl_die(char *msg) {
-    __dl_stdout_fputs("ERROR: ");
-    __dl_puts(msg);
+hidden noreturn noplt void __dl_die_impl(char *msg, char* filename, int lineno) {
+    __dl_stdout_fputs("[ERROR] ");
+        __dl_stdout_fputs(filename);
+        __dl_stdout_fputs(":");
+        __dl_print_int(lineno);
+        __dl_puts(msg);
     __dl_exit(127);
+}
+
+hidden noreturn noplt void __dl_warn_impl(char *msg, char* filename, int lineno) {
+    __dl_stdout_fputs("[WARN] ");
+    __dl_stdout_fputs(filename);
+    __dl_stdout_fputs(":");
+    __dl_print_int(lineno);
+    __dl_puts(msg);
 }
 
 hidden noplt void * __dl_memset(void* s, int c, size_t n) {
@@ -158,7 +170,7 @@ hidden noplt const Elf64_Sym* __dl_gnu_lookup(DlElfInfo* elf, const char* name) 
 
     const uint32_t* hashtab = elf->gnu_hash_table;
     if (!hashtab) return 0;
-    __dl_print_int(elf->ino);
+    // __dl_print_int(elf->ino);
 
     const uint32_t nbuckets = hashtab[0];
     const uint32_t symoffset = hashtab[1];

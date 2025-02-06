@@ -1,4 +1,6 @@
 #include "walkdyn.h"
+#include "utils.h"
+#include "global.h"
 #include <linux/limits.h>
 
 hidden noplt void __dl_ht_insert(DlInfoHTNode *tbl[], uint64_t len, DlElfInfo *elf) {
@@ -41,6 +43,8 @@ hidden noplt DlRecResult __dl_recursive_load_all(DlElfInfo *exec, EnvLdConfig *c
     }
     // append default paths
     __dl_puts("Parse default search path");
+    SL_APPEND("/usr/local/musl/lib", lib_path_tail);
+    SL_APPEND("/usr/lib/musl/lib", lib_path_tail);
     SL_APPEND("/lib", lib_path_tail);
     SL_APPEND("/usr/lib", lib_path_tail);
     SL_APPEND("/usr/local/lib", lib_path_tail);
@@ -63,7 +67,7 @@ hidden noplt DlRecResult __dl_recursive_load_all(DlElfInfo *exec, EnvLdConfig *c
 
     // First, load all preload libs
     for (DlFileInfo *e = preload_list; e; e = e->next) {
-        __dl_stdout_fputs("start list (ino) => "); __dl_print_int(e->ino);
+        // __dl_stdout_fputs("start list (ino) => "); __dl_print_int(e->ino);
         DlElfInfo *elf = __dl_ht_lookup(dlinfo_ht, DLINFO_HT_LEN, e->dev, e->ino);
         __dl_load_dfs(elf, lib_path, dlinfo_ht, &topo_list_end);
     }
@@ -78,24 +82,24 @@ hidden noplt DlRecResult __dl_recursive_load_all(DlElfInfo *exec, EnvLdConfig *c
 }
 
 hidden noplt void __dl_load_dfs(DlElfInfo *u, SLNode *lib_path, DlInfoHTNode *dlinfo_ht[], DlFileInfo ***topo_list_end_ptr) {
-    __dl_stdout_fputs("loading (ino) => "); __dl_print_int(u->ino);
     u->deps = 0; // we will build edges in the DFS process
     DlFileInfo **deps_tail = &u->deps;
     // traverse its dependencies
     for (SLNode *dep = u->dep_names; dep; dep = dep->next) {
-        __dl_stdout_fputs("=> try dep "); __dl_puts(dep->s);
+        __dl_stdout_fputs("=> Loading dependency: "); __dl_puts(dep->s);
         if (__dl_strcmp("ld-linux-x86-64.so.2", dep->s) == 0) continue;  // override the system loader
-        
+
         // TODO: $ORIGIN in rpath
         SLNode *loadlist = __dl_populate_load_list(dep->s, lib_path, u->runpath);
         bool already_loaded = false, can_load = false;
         for (SLNode *nextload = loadlist; nextload; nextload = nextload->next) {
-            __dl_stdout_fputs("==> try dep path ");
-            __dl_puts(nextload->s);
+            // __dl_stdout_fputs("==> try dep path ");
+            // __dl_puts(nextload->s);
             // first, search in vis[]
             struct stat statbuf;
             if (__dl_stat(nextload->s, &statbuf) != 0) {
-                __dl_stdout_fputs("ERROR: load failed: "); __dl_puts(nextload->s);
+                // Try other search paths
+                // __dl_stdout_fputs("ERROR: load failed: "); __dl_puts(nextload->s);
                 continue;
             }
             DlElfInfo *node = __dl_ht_lookup(dlinfo_ht, DLINFO_HT_LEN, statbuf.st_dev, statbuf.st_ino);
@@ -104,11 +108,12 @@ hidden noplt void __dl_load_dfs(DlElfInfo *u, SLNode *lib_path, DlInfoHTNode *dl
                 DL_FILE_APPEND_NODE(node->dev, node->ino, deps_tail); // add edge
                 already_loaded = true; break;
             }
-            
+
             if (already_loaded) {
+                __dl_warn("Already loaded, skipping");
                 break; // skip this library; loaded
             } else {
-                __dl_stdout_fputs("DEBUG: try to load: "); __dl_puts(nextload->s);
+                // __dl_stdout_fputs("DEBUG: try to load: "); __dl_puts(nextload->s);
                 DlElfInfo *v = __dl_loadelf(nextload->s);
                 if (v != 0) {
                     // edge exists; mark as visited
@@ -125,11 +130,11 @@ hidden noplt void __dl_load_dfs(DlElfInfo *u, SLNode *lib_path, DlInfoHTNode *dl
             __dl_stdout_fputs("Cannot find shared object: "); __dl_puts(dep->s);
             __dl_die("Dependency not found");
         }
-        __dl_stdout_fputs("go to next dependency of "); __dl_print_int(u->ino);
+        // __dl_stdout_fputs("go to next dependency of "); __dl_print_int(u->ino);
     }
 
     // Add self to the end of toposort list
-    __dl_stdout_fputs("append to topo list: "); __dl_print_int(u->ino);
+    // __dl_stdout_fputs("append to topo list: "); __dl_print_int(u->ino);
     DL_FILE_APPEND_NODE(u->dev, u->ino, *topo_list_end_ptr);
 }
 
@@ -216,6 +221,7 @@ hidden noplt const Elf64_Sym * __dl_bfs_search_symbol(
 }
 
 hidden noplt void __dl_relocate(DlElfInfo *elf, DlInfoHTNode **dlinfo_ht, DlFileInfo *preload, DlElfInfo *exec) {
+    __dl_stdout_fputs("Relocating: "); __dl_puts(elf->load_path ? elf->load_path : "NONAME");
     uint64_t dynv[DT_NUM];
     __dl_memset(dynv, 0, sizeof(dynv));
     __dl_parse_dyn(elf->dyn, dynv);
@@ -226,24 +232,53 @@ hidden noplt void __dl_relocate(DlElfInfo *elf, DlInfoHTNode **dlinfo_ht, DlFile
     uint64_t r;
     for (int i = 0; i < 2; i++) {
         if (i == 0) {
+            // __dl_puts("Relocating RELASZ");
             r = dynv[DT_RELASZ] / sizeof(Elf64_Rela);
             reloc_entry = (void*)(elf->base + dynv[DT_RELA]);
         } else {
+            // __dl_puts("Relocating PLTRELSZ");
             r = dynv[DT_PLTRELSZ] / sizeof(Elf64_Rela);
             reloc_entry = (void*)(elf->base + dynv[DT_JMPREL]);
         }
         if (r == 0) continue;
         for (; r; reloc_entry++, r--) {
+            // __dl_stdout_fputs("reloc entry remaining:");
+            // __dl_print_int(r);
             Elf64_Sym *local_sym = (elf->sym_table + ELF64_R_SYM(reloc_entry->r_info));
             const char* local_sym_str = elf->str_table + local_sym->st_name;
-            __dl_stdout_fputs("sym: "); __dl_puts(local_sym_str);
+
+            // if (local_sym->st_name) {
+            //     __dl_stdout_fputs("sym: ");
+            //     __dl_puts(local_sym_str);
+            // } else {
+            //     __dl_puts("no sym defined");
+            // }
 
             int64_t type = ELF64_R_TYPE(reloc_entry->r_info);
             if (type == R_X86_64_GLOB_DAT) {
                 // point to symbol in exec .bss
                 const Elf64_Sym *exec_sym = __dl_gnu_lookup(exec, local_sym_str);
                 uint64_t *offset = (void*)(elf->base + reloc_entry->r_offset);
-                *offset = exec->base + exec_sym->st_value;
+                if (exec_sym) {
+                    *offset = exec->base + exec_sym->st_value;
+                } else {
+                    // Fallback to libc ones.
+                    if (__dl_strcmp("__environ", local_sym_str) == 0) {
+                        *offset = (uint64_t) &__environ;
+                    } else if (__dl_strcmp("__hwcap", local_sym_str) == 0) {
+                        *offset = (uint64_t) &__hwcap;
+                    } else if (__dl_strcmp("__progname", local_sym_str) == 0) {
+                        *offset = (uint64_t) &__progname;
+                    } else if (__dl_strcmp("__progname_full", local_sym_str) == 0) {
+                        *offset = (uint64_t) &__progname_full;
+                    } else if (__dl_strcmp("__stack_chk_guard", local_sym_str) == 0) {
+                        *offset = (uint64_t) &__stack_chk_guard;
+                    } else {
+                        __dl_stdout_fputs(local_sym_str);
+                        __dl_puts(" => no glob data found");
+                        continue;
+                    }
+                }
             } else if (type == R_X86_64_COPY) {
                 // initialize symbol in exec .bss with data from library
                 if (elf != exec) __dl_die("R_X86_64_COPY should be only found in exec file");
@@ -257,6 +292,7 @@ hidden noplt void __dl_relocate(DlElfInfo *elf, DlInfoHTNode **dlinfo_ht, DlFile
                     sym->st_size
                 );
             } else if (type == R_X86_64_RELATIVE) {
+                // local_sym_str is never used here
                 uint64_t *offset = (void*)(elf->base + reloc_entry->r_offset);
                 *offset = elf->base + reloc_entry->r_addend;
             } else if (type == R_X86_64_JUMP_SLOT) {

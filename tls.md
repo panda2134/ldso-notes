@@ -34,7 +34,7 @@ the executable. This includes copying the initial image to TLS of main thread,
 setting up thread-control blocks, and use `arch_prctl` to setup %fs register.
 For instance, in stage 2 of musl dynamic linker, `__copy_tls` and `__init_tp`
 are used for these tasks. A statically allocated space called `builtin_tls`
-serves as the TLS for the main thread when ld.so is running.
+serves as the TLS for the main thread when ld.so is performing its tasks.
 
 ### DTV and `__tls_get_addr()`
 

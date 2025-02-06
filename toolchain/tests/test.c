@@ -2,7 +2,11 @@
 
 extern int a;
 
-void _start() {
+extern int putchar(int c);
+
+int main() {
+    putchar('H');
+    putchar('i');
     print_hex(a);
     print_hex(foo());
     a = 2;

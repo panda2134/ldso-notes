@@ -14,6 +14,8 @@
 // Forward tail_ptr to tail of linked list. tail_ptr must point to valid node.
 #define SL_GOTO_END(tail_ptr) while ((*(tail_ptr))->next) { tail_ptr = &((*(tail_ptr))->next); }
 
+__attribute__((always_inline))
+inline void __dl_exit(uint32_t code);
 hidden noplt void __dl_stdout_fputs(const char *buf);
 hidden noplt void __dl_stdout_fputs_s(const char *buf, size_t len);
 hidden noplt size_t __dl_strlen(const char *buf);
@@ -29,4 +31,8 @@ hidden noplt uint32_t __dl_gnu_hash(const char* name);
 hidden noplt uint32_t __dl_gnu_hash_get_num_syms(uint32_t *hashtab);
 hidden noplt const Elf64_Sym* __dl_gnu_lookup(struct dl_elf_info *elf, const char* name);
 
-hidden noreturn noplt void __dl_die(char *msg);
+#define __dl_die(msg) do { __dl_die_impl((msg), __FILE__, __LINE__); } while (0);
+hidden noreturn noplt void __dl_die_impl(char *msg, char* filename, int lineno);
+
+#define __dl_warn(msg) do { __dl_warn_impl((msg), __FILE__, __LINE__); } while (0);
+hidden noreturn noplt void __dl_warn_impl(char *msg, char* filename, int lineno);
