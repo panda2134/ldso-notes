@@ -1,4 +1,5 @@
 #include "syscalls.h"
+#include <sys/types.h>
 
 hidden noplt void * __dl_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
     void *ret = 0;
@@ -45,6 +46,38 @@ hidden noplt int __dl_mprotect(void *addr, size_t len, int prot) {
         "movl %%eax, %0"
         : "=r" (ret)
         : "r" (addr), "r" (len), "r" (prot)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
+
+hidden noplt int64_t __dl_read(uint32_t fd, char *buf, size_t count) {
+    int64_t ret = 0;
+    asm volatile (
+        "movl %1, %%edi;"
+        "movq %2, %%rsi;"
+        "movq %3, %%rdx;"
+        "movq $0, %%rax;" // SYS_read
+        "syscall;"
+        "movq %%rax, %0"
+        : "=r" (ret)
+        : "r" (fd), "r" (buf), "r" (count)
+        : "rcx", "r11", "rax"
+    );
+    return ret;
+}
+
+hidden noplt uint64_t __dl_lseek(uint32_t fd, uint64_t offset, uint32_t origin) {
+    uint64_t ret = 0;
+    asm volatile (
+        "movl %1, %%edi;"
+        "movq %2, %%rsi;"
+        "movl %3, %%edx;"
+        "movq $0, %%rax;" // SYS_read
+        "syscall;"
+        "movq %%rax, %0"
+        : "=r" (ret)
+        : "r" (fd), "r" (offset), "r" (origin)
         : "rcx", "r11", "rax"
     );
     return ret;

@@ -3,6 +3,7 @@
 #include "syscalls.h"
 #include "malloc.h"
 #include "defs.h"
+#include "tls.h"
 #include <stdbool.h>
 #include <elf.h>
 #include <sys/types.h>
@@ -29,7 +30,13 @@ typedef struct dl_elf_info {
     Elf64_Sym *sym_table;
     char *runpath;
     void* gnu_hash_table;
-    const char *load_path; // for debugging only! can be null
+    const char *load_path;
+    struct tls_module tls; /* TLS initial image for this DSO */
+
+    uint64_t shoff;		/* Section header table offset */
+    uint16_t shentsize;	/* Section header table entry size */
+    uint16_t shnum;		/* Section header table entry count */
+    uint16_t shstrndx;	/* Section header string table index */
 
     DlFileInfo *deps;
     bool relocated;

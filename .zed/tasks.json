@@ -1,0 +1,28 @@
+[
+  {
+    "label": "Build",
+    "command": "make --directory=./toolchain",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "shell": "system"
+  },
+  {
+    "label": "Clean",
+    "command": "make clean --directory=./toolchain",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "shell": "system"
+  },
+  {
+    "label": "Run",
+    "cwd": "$ZED_WORKPLACE_ROOT/toolchain",
+    "command": "./ld.my.so ./tests/test.out",
+    "shell": "system"
+  }
+]

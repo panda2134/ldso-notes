@@ -1,5 +1,6 @@
 #include "dynload.h"
 #include "utils.h"
+#include <elf.h>
 #include <sys/fcntl.h>
 #include <linux/limits.h>
 
@@ -47,6 +48,10 @@ hidden noplt DlElfInfo * __dl_loadelf(const char* path) {
     off_t phoff = ehdr->e_phoff;
     ret->elf_type = ehdr->e_type;
     ret->phnum = ehdr->e_phnum;
+    ret->shoff = ehdr->e_shoff;
+    ret->shnum = ehdr->e_shnum;
+    ret->shentsize = ehdr->e_shentsize;
+    ret->shstrndx = ehdr->e_shstrndx;
     __dl_munmap(ehdr, sizeof(Elf64_Ehdr));
 
     // Calculate total size of memory image
@@ -164,6 +169,11 @@ hidden noplt bool __dl_loadelf_extras(DlElfInfo *ret) {
         if (e->p_type == PT_DYNAMIC) {
             ret->dyn = (void*)(ret->base + e->p_vaddr);
             break;
+        } else if (e->p_type == PT_TLS) {
+            ret->tls.align = e->p_align;
+            ret->tls.len = e->p_filesz;
+            ret->tls.size = e->p_memsz;
+            ret->tls.image = (void*)(ret->base + e->p_vaddr);
         }
     }
 

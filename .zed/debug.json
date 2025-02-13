@@ -1,0 +1,13 @@
+[
+  {
+    "label": "Debug on Test Binary",
+    "adapter": "gdb",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/toolchain/ld.my.so",
+    "cwd": "$ZED_WORKTREE_ROOT/toolchain",
+    "initialize_args": {
+      "stopAtBeginningOfMainSubprogram": true
+      // "args": "./tests/test.out"
+    }
+  }
+]

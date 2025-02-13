@@ -265,8 +265,6 @@ hidden noplt void __dl_relocate(DlElfInfo *elf, DlInfoHTNode **dlinfo_ht, DlFile
                     // Fallback to libc ones.
                     if (__dl_strcmp("__environ", local_sym_str) == 0) {
                         *offset = (uint64_t) &__environ;
-                    } else if (__dl_strcmp("__hwcap", local_sym_str) == 0) {
-                        *offset = (uint64_t) &__hwcap;
                     } else if (__dl_strcmp("__progname", local_sym_str) == 0) {
                         *offset = (uint64_t) &__progname;
                     } else if (__dl_strcmp("__progname_full", local_sym_str) == 0) {

@@ -3,12 +3,16 @@
 #include "syscall.h"
 #include "walkdyn.h"
 #include "global.h"
+#include "tls.h"
+#include <stddef.h>
 #include <elf.h>
 #include <linux/limits.h>
 
 static uint64_t dynv[DT_NUM];
 static DlElfInfo *exec = 0;
+static DlElfInfo *libc_dso = 0;
 static int ret_code = 0;
+static struct __libc *libc = 0;
 
 // The _start function should be the first function in main.c. It is the entry point of dynamic linker.
 // Do not move it around, as its address is used for detecting self-relocation.
@@ -22,7 +26,7 @@ noreturn void _start() {
         :
         : "rdi", "rax"
     );
-    run_init();
+    run_init(); // musl libc does this for us
     __dl_puts("Let's take over the world!");
     asm volatile ("mov $0, %%rbp;"
         "add $0x8, %%rsp;"
@@ -231,6 +235,49 @@ hidden noplt void _start_c(void* sp) {
     __dl_puts("Relocation done.");
 
     __dl_stdout_fputs("Stack pointer = "); __dl_print_hex((uint64_t)sp);
+
+    // Next, we initialize TLS.
+    // Unfortunately, the non-export symbol __libc is used to pass information from the
+    // dynamic linker to musl libc. We have to work around this:
+    // 1. Identify libc from the list of libraries. Guess by checking if the symbols
+    //    scanf and __libc_start_main are defined.
+    // 2. Locate the local symbol __libc, and assign it to the pointer.
+    // 3. Merge TLS initial images from DSOs, initialize our TLS, and pass that to libc.
+    for (DlFileInfo *elf_file = res.topo_list; elf_file; elf_file = elf_file->next) {
+        DlElfInfo *elf = __dl_ht_lookup(dlinfo_ht, DLINFO_HT_LEN, elf_file->dev, elf_file->ino);
+        bool has_scanf = __dl_gnu_lookup(elf, "scanf") != 0;
+        bool has_libc_start_main = __dl_gnu_lookup(elf, "__libc_start_main") != 0;
+        if (has_scanf && has_libc_start_main) {
+            libc_dso = elf; break;
+        }
+    }
+
+    if (libc_dso != 0) {
+        const Elf64_Sym* sym = 0;
+        size_t cnt = __dl_gnu_hash_get_num_syms(libc_dso->gnu_hash_table);
+        __dl_print_int(cnt);
+        for (Elf64_Sym* s = libc_dso->sym_table; cnt != 0; s++, cnt--) {
+            __dl_puts(libc_dso->str_table + s->st_name);
+            if (__dl_strcmp("__libc", libc_dso->str_table + s->st_name) == 0) {
+                sym = s; break;
+            }
+        }
+        if (sym == 0) __dl_die("__libc not found in musl");
+        __dl_stdout_fputs("musl libc found. __libc vaddr = ");
+        libc = (void*)(libc_dso->base + sym->st_value);
+        __dl_print_hex((uint64_t) libc);
+
+        libc->auxv = (void*) auxv;
+        // libc->tls_size = sizeof builtin_tls;
+        // libc->tls_align = 8; // For x86_64 only
+        // TODO: do we need builtin_tls at all? musl ld.so uses libc,
+        // so it first allocates builtin_tls, and after loading all
+        // shared objects, it creates the new initial TLS image if
+        // necessary. As we've already loaded all libraries, a better
+        // approach seems to be a) go through tls of all DSOs,
+        // b) chain them to form the initial TLS image
+    }
+
 }
 
 hidden noplt void run_init() {
